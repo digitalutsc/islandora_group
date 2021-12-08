@@ -1,0 +1,9 @@
+islandora_group.config_form:
+  path: '/admin/config/group_access_control/config'
+  defaults:
+    _form: '\Drupal\group_access_control\Form\ConfigForm'
+    _title: 'ConfigForm'
+  requirements:
+    _permission: 'access administration pages'
+  options:
+    _admin_route: TRUE
