@@ -1,326 +1,398 @@
 <?php
 
-  /**
-   * @file
-   * Contains islandora_group.module.
-   */
+/**
+ * @file
+ * Contains islandora_group.module.
+ */
 
-  use Drupal\Core\Routing\RouteMatchInterface;
-  use Drupal\node\NodeInterface;
-  use Drupal\group\Entity\GroupContent;
-  use Drupal\media\MediaInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\node\NodeInterface;
+use Drupal\group\Entity\GroupContent;
+use Drupal\media\MediaInterface;
+use Drupal\group_access_control\Form\ConfigForm;
+
+/**
+ * Implements hook_help().
+ */
+function group_access_control_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the islandora_group module.
+    case 'help.page.islandora_group':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Access Control with Group') . '</p>';
+      return $output;
+
+    default:
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function group_access_control_theme() {
+  return [
+    'islandora_group' => [
+      'render element' => 'children',
+    ],
+  ];
+}
+
+/**
+ * Implements hook_entity_insert
+ *
+ * @param \Drupal\Core\Entity\EntityInterface $entity
+ */
+function group_access_control_entity_insert(Drupal\Core\Entity\EntityInterface $entity) {
+  sync_associated_taxonomy_with_group($entity, "insert");
+}
+
+/**
+ * Implements hook_entity_update
+ *
+ * @param \Drupal\Core\Entity\EntityInterface $entity
+ */
+function group_access_control_entity_update(Drupal\Core\Entity\EntityInterface $entity) {
+  sync_associated_taxonomy_with_group($entity, "update");
+}
+
+/**
+ * Implements hook_entity_delete
+ *
+ * @param \Drupal\Core\Entity\EntityInterface $entity
+ */
+function group_access_control_entity_delete(Drupal\Core\Entity\EntityInterface $entity) {
+  sync_associated_taxonomy_with_group($entity, "delete");
+}
+
+
+/**
+ * Create a taxonomy term which is the same name with Group
+ * @param \Drupal\Core\Entity\EntityInterface $entity
+ * @return void
+ * @throws \Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException
+ * @throws \Drupal\Component\Plugin\Exception\PluginNotFoundException
+ * @throws \Drupal\Core\Entity\EntityStorageException
+ */
+function sync_associated_taxonomy_with_group (Drupal\Core\Entity\EntityInterface $entity, String $action) {
+  if ($entity->getEntityTypeId() === "group") {
+    $group_type = $entity->bundle();
+
+    // get the Group associated taxonomy vocabulary
+    $config = \Drupal::config(ConfigForm::CONFIG_NAME);
+    $taxonomy = $config->get($group_type);
+
+    // create the taxonomy term which has the same name as Group Name
+    $terms = \Drupal::entityTypeManager()->getStorage('taxonomy_term')->loadTree($taxonomy);
+
+    // create an taxonomy term which has the same name as group name.
+    $existedTerm = null;
+    foreach ($terms as $term) {
+      if ($term->name === $entity->label()) {
+        $existedTerm = $term;
+        break;
+      }
+    }
+    switch ($action) {
+      case "insert":
+      case "update": {
+        // if no found terms, create new one
+        if ($existedTerm == null) {
+          \Drupal\taxonomy\Entity\Term::create([
+            'name' => $entity->label(),
+            'vid' => $taxonomy,
+          ])->save();
+        }
+        break;
+      }
+      case "delete": {
+        if ($existedTerm != null ) {
+          $controller = \Drupal::entityTypeManager()->getStorage('taxonomy_term');
+          $tobedeleted = $controller->loadMultiple([$existedTerm->tid]);
+          $controller->delete($tobedeleted);
+        }
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function group_access_control_node_insert(NodeInterface $node) {
+
+// Exit early if it has no access terms
+  if (!$node->hasField('field_access_terms')) {
+    return;
+  }
+
+  $terms = $node->get('field_access_terms')->referencedEntities();
+  if (empty($terms)) {
+    return;
+  }
+
+// Arrange groups keyed by their name so we can look them up later.
+  $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
+  $groups_by_name = [];
+  foreach ($groups as $group) {
+    $groups_by_name[$group->label()] = $group;
+  }
+
+  $term = reset($terms);
+  if (isset($groups_by_name[$term->label()])) {
+    $group = $groups_by_name[$term->label()];
+    $group->addContent($node, 'group_node:' . $node->bundle());
+  }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function group_access_control_node_update(NodeInterface $node) {
+// Exit early if it has no access terms
+  if (!$node->hasField('field_access_terms')) {
+    return;
+  }
+
+// Arrange groups keyed by their name so we can look them up later.
+  $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
+  $groups_by_name = [];
+  foreach ($groups as $group) {
+    $groups_by_name[$group->label()] = $group;
+  }
+
+// Get the access terms for the node.
+  $terms = $node->get('field_access_terms')->referencedEntities();
+
+// Delete content from groups if there's no terms.
+  if (empty($terms)) {
+    foreach (GroupContent::loadByEntity($node) as $group_content) {
+      $group_content->delete();
+    }
+    foreach (\Drupal::service('islandora.utils')->getMedia($node) as $media) {
+      foreach (GroupContent::loadByEntity($media) as $group_content) {
+        $group_content->delete();
+      }
+    }
+    return;
+  }
+
+  $term = reset($terms);
+
+  $found = FALSE;
+  foreach (GroupContent::loadByEntity($node) as $group_content) {
+    $group = $group_content->getGroup();
+    if ($group->label() != $term->label()) {
+      $group_content->delete();
+    } else {
+      $found = TRUE;
+    }
+  }
+
+  if (!$found && isset($groups_by_name[$term->label()])) {
+    $group = $groups_by_name[$term->label()];
+    $group->addContent($node, 'group_node:' . $node->bundle());
+  }
+
+// Reindex media since things have changed.
+  foreach (\Drupal::service('islandora.utils')->getMedia($node) as $media) {
+    islandora_group_media_update($media);
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function islandora_group_node_delete(NodeInterface $node) {
+// Remove content from all groups.
+  foreach (GroupContent::loadByEntity($node) as $group_content) {
+    $group_content->delete();
+  }
+}
+
+/**
+ * Implements hook_media_insert().
+ */
+function islandora_group_media_insert(MediaInterface $media) {
+  $node = \Drupal::service('islandora.utils')->getParentNode($media);
+
+  if (empty($node)) {
+    return;
+  }
+
+// Exit early if it has no access terms
+  if (!$node->hasField('field_access_terms')) {
+    return;
+  }
+
+  $terms = $node->get('field_access_terms')->referencedEntities();
+  if (empty($terms)) {
+    return;
+  }
+
+// Arrange groups keyed by their name so we can look them up later.
+  $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
+  $groups_by_name = [];
+  foreach ($groups as $group) {
+    $groups_by_name[$group->label()] = $group;
+  }
+
+  $term = reset($terms);
+  if (isset($groups_by_name[$term->label()])) {
+    $group = $groups_by_name[$term->label()];
+    $group->addContent($media, 'group_media:' . $media->bundle());
+  }
+}
+
+/**
+ * Implements hook_media_update().
+ */
+function islandora_group_media_update(MediaInterface $media) {
+  $node = \Drupal::service('islandora.utils')->getParentNode($media);
+
+// Unindex if removed from a node.
+  if (empty($node)) {
+    foreach (GroupContent::loadByEntity($media) as $group_content) {
+      $group_content->delete();
+    }
+    return;
+  }
+
+// Exit early if it has no access terms
+  if (!$node->hasField('field_access_terms')) {
+    return;
+  }
+
+// Arrange groups keyed by their name so we can look them up later.
+  $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
+  $groups_by_name = [];
+  foreach ($groups as $group) {
+    $groups_by_name[$group->label()] = $group;
+  }
+
+
+// Get the access terms for the node.
+  $terms = $node->get('field_access_terms')->referencedEntities();
+
+// Delete content from groups if there's no terms.
+  if (empty($terms)) {
+    foreach (GroupContent::loadByEntity($media) as $group_content) {
+      $group_content->delete();
+    }
+    return;
+  }
+
+  $term = reset($terms);
+
+  $found = FALSE;
+  foreach (GroupContent::loadByEntity($media) as $group_content) {
+    $group = $group_content->getGroup();
+    if ($group->label() != $term->label()) {
+      $group_content->delete();
+    } else {
+      $found = TRUE;
+    }
+  }
+
+  if (!$found && isset($groups_by_name[$term->label()])) {
+    $group = $groups_by_name[$term->label()];
+    $group->addContent($media, 'group_media:' . $media->bundle());
+  }
+}
+
+/**
+ * Implements hook_media_delete().
+ */
+function islandora_group_media_delete(MediaInterface $media) {
+  foreach (GroupContent::loadByEntity($media) as $group_content) {
+    $group_content->delete();
+  }
+}
+
+
+/**
+ * Debug function: display any variable to error log.
+ *
+ * @param $thing
+ */
+if (!function_exists('print_log')) {
 
   /**
-   * Implements hook_help().
+   * Print log to apache log.
    */
-  function group_access_control_help($route_name, RouteMatchInterface $route_match)
-  {
-    switch ($route_name) {
-      // Main module help for the islandora_group module.
-      case 'help.page.islandora_group':
-        $output = '';
-        $output .= '<h3>' . t('About') . '</h3>';
-        $output .= '<p>' . t('Access Control with Group') . '</p>';
-        return $output;
+  function print_log($thing) {
+    error_log(print_r($thing, TRUE), 0);
+  }
+
+}
+/**
+ * Debug function: display any variable to current webpage.
+ *
+ * @param $thing
+ */
+if (!function_exists('logging')) {
+
+  /**
+   * Print log to webpage.
+   */
+  function logging($thing) {
+    echo "<pre>";
+    print_r($thing);
+    echo "</pre>";
+  }
+
+}
+
+/**
+ * Debug function: display any variable to drupal Reports Log messages.
+ */
+if (!function_exists('drupal_log')) {
+
+  /**
+   * Print log in Recent Log messages.
+   */
+  function drupal_log($msg, $type = "error") {
+    switch ($type) {
+      case "notice":
+        \Drupal::logger(basename(__FILE__, '.module'))->notice($msg);
+        break;
+
+      case "log":
+        \Drupal::logger(basename(__FILE__, '.module'))->log(RfcLogLevel::NOTICE, $msg);
+        break;
+
+      case "warning":
+        \Drupal::logger(basename(__FILE__, '.module'))->warning($msg);
+        break;
+
+      case "alert":
+        \Drupal::logger(basename(__FILE__, '.module'))->alert($msg);
+        break;
+
+      case "critical":
+        \Drupal::logger(basename(__FILE__, '.module'))->critical($msg);
+        break;
+
+      case "debug":
+        \Drupal::logger(basename(__FILE__, '.module'))->debug($msg);
+        break;
+
+      case "info":
+        \Drupal::logger(basename(__FILE__, '.module'))->info($msg);
+        break;
+
+      case "emergency":
+        \Drupal::logger(basename(__FILE__, '.module'))->emergency($msg);
+        break;
 
       default:
+        \Drupal::logger(basename(__FILE__, '.module'))->error($msg);
+        break;
     }
   }
 
-  /**
-   * Implements hook_theme().
-   */
-  function group_access_control_theme()
-  {
-    return [
-      'islandora_group' => [
-        'render element' => 'children',
-      ],
-    ];
-  }
-
-
-  /**
-   * Implements hook_node_insert().
-   */
-  function group_access_control_node_insert(NodeInterface $node)
-  {
-    // Exit early if it has no access terms
-    if (!$node->hasField('field_access_terms')) {
-      return;
-    }
-
-    $terms = $node->get('field_access_terms')->referencedEntities();
-    if (empty($terms)) {
-      return;
-    }
-
-    // Arrange groups keyed by their name so we can look them up later.
-    $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
-    $groups_by_name = [];
-    foreach ($groups as $group) {
-      $groups_by_name[$group->label()] = $group;
-    }
-
-    $term = reset($terms);
-    if (isset($groups_by_name[$term->label()])) {
-      $group = $groups_by_name[$term->label()];
-      $group->addContent($node, 'group_node:' . $node->bundle());
-    }
-  }
-
-  /**
-   * Implements hook_node_update().
-   */
-  function group_access_control_node_update(NodeInterface $node)
-  {
-    // Exit early if it has no access terms
-    if (!$node->hasField('field_access_terms')) {
-      return;
-    }
-
-    // Arrange groups keyed by their name so we can look them up later.
-    $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
-    $groups_by_name = [];
-    foreach ($groups as $group) {
-      $groups_by_name[$group->label()] = $group;
-    }
-
-    // Get the access terms for the node.
-    $terms = $node->get('field_access_terms')->referencedEntities();
-
-    // Delete content from groups if there's no terms.
-    if (empty($terms)) {
-      foreach (GroupContent::loadByEntity($node) as $group_content) {
-        $group_content->delete();
-      }
-      foreach (\Drupal::service('islandora.utils')->getMedia($node) as $media) {
-        foreach (GroupContent::loadByEntity($media) as $group_content) {
-          $group_content->delete();
-        }
-      }
-      return;
-    }
-
-    $term = reset($terms);
-
-    $found = FALSE;
-    foreach (GroupContent::loadByEntity($node) as $group_content) {
-      $group = $group_content->getGroup();
-      if ($group->label() != $term->label()) {
-        $group_content->delete();
-      } else {
-        $found = TRUE;
-      }
-    }
-
-    if (!$found && isset($groups_by_name[$term->label()])) {
-      $group = $groups_by_name[$term->label()];
-      $group->addContent($node, 'group_node:' . $node->bundle());
-    }
-
-    // Reindex media since things have changed.
-    foreach (\Drupal::service('islandora.utils')->getMedia($node) as $media) {
-      islandora_group_media_update($media);
-    }
-  }
-
-  /**
-   * Implements hook_node_delete().
-   */
-  function islandora_group_node_delete(NodeInterface $node)
-  {
-    // Remove content from all groups.
-    foreach (GroupContent::loadByEntity($node) as $group_content) {
-      $group_content->delete();
-    }
-  }
-
-  /**
-   * Implements hook_media_insert().
-   */
-  function islandora_group_media_insert(MediaInterface $media)
-  {
-    $node = \Drupal::service('islandora.utils')->getParentNode($media);
-
-    if (empty($node)) {
-      return;
-    }
-
-    // Exit early if it has no access terms
-    if (!$node->hasField('field_access_terms')) {
-      return;
-    }
-
-    $terms = $node->get('field_access_terms')->referencedEntities();
-    if (empty($terms)) {
-      return;
-    }
-
-    // Arrange groups keyed by their name so we can look them up later.
-    $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
-    $groups_by_name = [];
-    foreach ($groups as $group) {
-      $groups_by_name[$group->label()] = $group;
-    }
-
-    $term = reset($terms);
-    if (isset($groups_by_name[$term->label()])) {
-      $group = $groups_by_name[$term->label()];
-      $group->addContent($media, 'group_media:' . $media->bundle());
-    }
-  }
-
-  /**
-   * Implements hook_media_update().
-   */
-  function islandora_group_media_update(MediaInterface $media)
-  {
-    $node = \Drupal::service('islandora.utils')->getParentNode($media);
-
-    // Unindex if removed from a node.
-    if (empty($node)) {
-      foreach (GroupContent::loadByEntity($media) as $group_content) {
-        $group_content->delete();
-      }
-      return;
-    }
-
-    // Exit early if it has no access terms
-    if (!$node->hasField('field_access_terms')) {
-      return;
-    }
-
-    // Arrange groups keyed by their name so we can look them up later.
-    $groups = \Drupal::service('entity_type.manager')->getStorage('group')->loadMultiple();
-    $groups_by_name = [];
-    foreach ($groups as $group) {
-      $groups_by_name[$group->label()] = $group;
-    }
-
-
-    // Get the access terms for the node.
-    $terms = $node->get('field_access_terms')->referencedEntities();
-
-    // Delete content from groups if there's no terms.
-    if (empty($terms)) {
-      foreach (GroupContent::loadByEntity($media) as $group_content) {
-        $group_content->delete();
-      }
-      return;
-    }
-
-    $term = reset($terms);
-
-    $found = FALSE;
-    foreach (GroupContent::loadByEntity($media) as $group_content) {
-      $group = $group_content->getGroup();
-      if ($group->label() != $term->label()) {
-        $group_content->delete();
-      } else {
-        $found = TRUE;
-      }
-    }
-
-    if (!$found && isset($groups_by_name[$term->label()])) {
-      $group = $groups_by_name[$term->label()];
-      $group->addContent($media, 'group_media:' . $media->bundle());
-    }
-  }
-
-  /**
-   * Implements hook_media_delete().
-   */
-  function islandora_group_media_delete(MediaInterface $media)
-  {
-    foreach (GroupContent::loadByEntity($media) as $group_content) {
-      $group_content->delete();
-    }
-  }
-
-
-  /**
-   * Debug function: display any variable to error log.
-   *
-   * @param $thing
-   */
-  if (!function_exists('print_log')) {
-
-    /**
-     * Print log to apache log.
-     */
-    function print_log($thing)
-    {
-      error_log(print_r($thing, TRUE), 0);
-    }
-
-  }
-  /**
-   * Debug function: display any variable to current webpage.
-   *
-   * @param $thing
-   */
-  if (!function_exists('logging')) {
-
-    /**
-     * Print log to webpage.
-     */
-    function logging($thing)
-    {
-      echo "<pre>";
-      print_r($thing);
-      echo "</pre>";
-    }
-
-  }
-
-  /**
-   * Debug function: display any variable to drupal Reports Log messages.
-   */
-  if (!function_exists('drupal_log')) {
-
-    /**
-     * Print log in Recent Log messages.
-     */
-    function drupal_log($msg, $type = "error")
-    {
-      switch ($type) {
-        case "notice":
-          \Drupal::logger(basename(__FILE__, '.module'))->notice($msg);
-          break;
-
-        case "log":
-          \Drupal::logger(basename(__FILE__, '.module'))->log(RfcLogLevel::NOTICE, $msg);
-          break;
-
-        case "warning":
-          \Drupal::logger(basename(__FILE__, '.module'))->warning($msg);
-          break;
-
-        case "alert":
-          \Drupal::logger(basename(__FILE__, '.module'))->alert($msg);
-          break;
-
-        case "critical":
-          \Drupal::logger(basename(__FILE__, '.module'))->critical($msg);
-          break;
-
-        case "debug":
-          \Drupal::logger(basename(__FILE__, '.module'))->debug($msg);
-          break;
-
-        case "info":
-          \Drupal::logger(basename(__FILE__, '.module'))->info($msg);
-          break;
-
-        case "emergency":
-          \Drupal::logger(basename(__FILE__, '.module'))->emergency($msg);
-          break;
-
-        default:
-          \Drupal::logger(basename(__FILE__, '.module'))->error($msg);
-          break;
-      }
-    }
-
-  }
+}
