@@ -184,7 +184,7 @@ function islandora_group_batch_finished($success, $results, $operations) {
     if ($success) {
         // Here we could do something meaningful with the results.
         // We just display the number of nodes we processed...
-        $messenger->addMessage(t('@count access control applied.', ['@count' => count($results)]));
+        $messenger->addMessage(t('Access control applied successfully.', ['@total' => count($operations)]));
     }
     else {
         // An error occurred.
