@@ -744,10 +744,19 @@ class Utilities
     }
 
     // if the above approach is not effective
-    if (count($group_ids) == 0) {
+    if (empty($group_ids)) {
       $node = \Drupal\node\Entity\Node::load($nid);
+
+      if (!$node instanceof \Drupal\Core\Entity\EntityInterface) {
+        \Drupal::logger('islandora_group')->warning('Could not load node entity for nid @nid during getGroupsByNode()', [
+          '@nid' => $nid,
+        ]);
+          return [];
+      }
+
       $storage = \Drupal::entityTypeManager()->getStorage('group_relationship');
       $relations = $storage->loadByEntity($node);
+
       foreach ($relations as $rel) {
         if ($rel->getEntity()->getEntityTypeId() == 'node') {
           $group_ids[] = $rel->getGroup()->label();
