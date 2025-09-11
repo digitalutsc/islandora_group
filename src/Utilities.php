@@ -46,6 +46,33 @@ class Utilities
   }
 
   /**
+   * Clear out existing Group-entity relations
+   *
+   * @param $entity
+   * @return void
+   * @throws \Drupal\Core\Entity\EntityStorageException
+   */
+  public static function clear_group_relation_by_entity($entity) {
+    // get access control field from config
+    if ($entity->getEntityTypeId() === "node") {
+      // get access control field from config
+      $access_control_field = self::getAccessControlFieldinNode($entity);
+    } else if ($entity->getEntityTypeId() === "media") {
+      $access_control_field = self::getAccessControlFieldinMedia($entity);
+    }
+
+    // check if $access_control_field exists and valid
+    if (empty($access_control_field) || !$entity->hasField($access_control_field)) {
+      return;
+    }
+    // for each term, loop through groups-entity
+    foreach (GroupRelationship::loadByEntity($entity) as $group_content) {
+      $group_content->delete();
+    }
+  }
+
+
+  /**
    * @param NodeInterface $node
    * @return mixed
    */
@@ -65,6 +92,7 @@ class Utilities
     return (isset($fields) && array_key_exists($media->bundle(), $fields)) ? $fields[$media->bundle()] : null;
   }
 
+
   /**
    * @param $nid
    * @param $selected_groups
@@ -75,12 +103,15 @@ class Utilities
     // get the node
     $node = \Drupal\node\Entity\Node::load($nid);
 
+    // Clear any previous relations before adding new ones if called from the UI
+
     // 1. clear field_access_terms in media level
     self::untag_existed_field_access_terms($node);
 
-    // 2. clearing group relation with islandora object
+      // 2. clearing group relation with islandora object
     self::clear_group_relation_by_entity($node);
 
+    
 
     if (count($targets) > 0) {
       // get access control field from config
@@ -102,7 +133,6 @@ class Utilities
    */
   public static function taggingFieldAccessTermMedia($media, $targets) {
 
-    // clear field_access_terms in media level
     self::untag_existed_field_access_terms($media);
 
     if (count($targets) > 0) {
@@ -115,6 +145,8 @@ class Utilities
     }
     self::adding_media_only_into_group($media);
   }
+
+
 
   /**
    * Get Islandora Access terms associated with Groups
@@ -253,6 +285,35 @@ class Utilities
       return;
     }
 
+    // Get the access terms for the node.
+    $node_terms = $entity->get($access_control_field)->referencedEntities();
+    if (empty($node_terms)) {
+      // no term, exist
+      return;
+    }
+
+    // Arrange groups keyed by their name so we can look them up later.
+    $groups_by_name = self::arrange_group_by_name();
+
+    // if there is terms in field_access_term
+    foreach ($node_terms as $term) {
+      if (isset($groups_by_name[$term->label()])) {
+        $group = $groups_by_name[$term->label()];
+        $group->addRelationship($entity, 'group_node:' . $entity->bundle());
+      }
+    }
+  }
+
+
+  public static function updating_islandora_object_to_group($entity) {
+    // get access control field from config
+    $access_control_field = self::getAccessControlFieldinNode($entity);
+
+    // Exit early if it has no access terms
+    if (empty($access_control_field) || !$entity->hasField($access_control_field)) {
+      return;
+    }
+
     // clear out group relations with islandora_object first
     self::clear_group_relation_by_entity($entity);
 
@@ -364,32 +425,6 @@ class Utilities
   }
 
   /**
-   * Clear out existing Group-entity relations
-   *
-   * @param $entity
-   * @return void
-   * @throws \Drupal\Core\Entity\EntityStorageException
-   */
-  public static function clear_group_relation_by_entity($entity) {
-    // get access control field from config
-    if ($entity->getEntityTypeId() === "node") {
-      // get access control field from config
-      $access_control_field = self::getAccessControlFieldinNode($entity);
-    } else if ($entity->getEntityTypeId() === "media") {
-      $access_control_field = self::getAccessControlFieldinMedia($entity);
-    }
-
-    // check if $access_control_field exists and valid
-    if (empty($access_control_field) || !$entity->hasField($access_control_field)) {
-      return;
-    }
-    // for each term, loop through groups-entity
-    foreach (GroupRelationship::loadByEntity($entity) as $group_content) {
-      $group_content->delete();
-    }
-  }
-
-  /**
    * @param $entity
    * @return void
    */
@@ -443,6 +478,34 @@ class Utilities
       return;
     }
 
+    // get field_access_terms
+    $terms = $media->get($access_control_field)->referencedEntities();
+    if (empty($terms)) {
+      // no term, exit;
+      return;
+    }
+
+    // Arrange groups keyed by their name so we can look them up later.
+    $groups_by_name = self::arrange_group_by_name();
+
+    foreach ($terms as $term) {
+      if (isset($groups_by_name[$term->label()])) {
+        $group = $groups_by_name[$term->label()];
+        $group->addRelationship($media, 'group_media:' . $media->bundle());
+      }
+    }
+  }
+
+
+  public static function updating_media_only_into_group(MediaInterface $media) {
+    // get access control field from config
+    $access_control_field = self::getAccessControlFieldinMedia($media);
+
+    // For standalone media (no parent node)
+    if (empty($access_control_field) || !$media->hasField($access_control_field)) {
+      return;
+    }
+
     // clear group relation with media
     self::clear_group_relation_by_entity($media);
 
@@ -463,6 +526,9 @@ class Utilities
       }
     }
   }
+
+
+
 
   /**
    * Redirect to confirm form to add Children nodes to groups
@@ -614,7 +680,7 @@ class Utilities
       $media = $form_object->getEntity();
 
       // add media only to group
-      self::adding_media_only_into_group($media);
+      self::updating_media_only_into_group($media);
     }
   }
 
@@ -682,7 +748,7 @@ class Utilities
       $entity = $form_object->getEntity();
 
       // add node to group
-      self::adding_islandora_object_to_group($entity);
+      self::updating_islandora_object_to_group($entity);
 
       // redirect if the islandora_object is a collection
       self::redirect_adding_childrennode_to_group($form, $form_state, $entity);
@@ -736,6 +802,7 @@ class Utilities
       ->condition('entity_id', $nid)
       ->accessCheck(TRUE)
       ->execute();
+
     $relations = \Drupal\group\Entity\GroupRelationship::loadMultiple($ids);
     foreach ($relations as $rel) {
       if ($rel->getEntity()->getEntityTypeId() == 'node') {
@@ -743,26 +810,6 @@ class Utilities
       }
     }
 
-    // if the above approach is not effective
-    if (empty($group_ids)) {
-      $node = \Drupal\node\Entity\Node::load($nid);
-
-      if (!$node instanceof \Drupal\Core\Entity\EntityInterface) {
-        \Drupal::logger('islandora_group')->warning('Could not load node entity for nid @nid during getGroupsByNode()', [
-          '@nid' => $nid,
-        ]);
-          return [];
-      }
-
-      $storage = \Drupal::entityTypeManager()->getStorage('group_relationship');
-      $relations = $storage->loadByEntity($node);
-
-      foreach ($relations as $rel) {
-        if ($rel->getEntity()->getEntityTypeId() == 'node') {
-          $group_ids[] = $rel->getGroup()->label();
-        }
-      }
-    }
     return $group_ids;
   }
 
@@ -781,18 +828,6 @@ class Utilities
     foreach ($relations as $rel) {
       if ($rel->getEntity()->getEntityTypeId() == 'media') {
         $group_ids[] = $rel->getGroup()->label();
-      }
-    }
-
-    // if the above approach is not effective
-    if (count($group_ids) == 0) {
-      $media = \Drupal\media\Entity\Media::load($mid);
-      $storage = \Drupal::entityTypeManager()->getStorage('group_relationship');
-      $relations = $storage->loadByEntity($media);
-      foreach ($relations as $rel) {
-        if ($rel->getEntity()->getEntityTypeId() == 'media') {
-          $group_ids[] = $rel->getGroup()->label();
-        }
       }
     }
     return $group_ids;

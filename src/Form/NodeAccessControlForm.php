@@ -378,7 +378,7 @@ class NodeAccessControlForm extends FormBase {
             'title' => t('Applying access control...'),
             'operations' => $operations,
             'finished' => 'islandora_group_batch_finished',
-            'progress_message' => $this->t('Applied @current out of @total.'),
+            'progress_message' => $this->t('Applied @percentage%'),
             'error_message' => $this->t('Access control has encountered an error.'),
         );
         batch_set($batch);
