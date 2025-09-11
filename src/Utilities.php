@@ -809,6 +809,7 @@ class Utilities
         $group_ids[] = $rel->getGroup()->label();
       }
     }
+
     return $group_ids;
   }
 
