@@ -13,11 +13,18 @@ use Drupal\Tests\BrowserTestBase;
 class LoadTest extends BrowserTestBase {
 
   /**
+   * Default theme to use during the test.
+   *
+   * @var string
+   */
+  protected $defaultTheme = 'stark';
+
+  /**
    * Modules to enable.
    *
    * @var array
    */
-  public static $modules = ['islandora_group'];
+  protected static $modules = ['islandora_group'];
 
   /**
    * A user with permission to administer site configuration.
