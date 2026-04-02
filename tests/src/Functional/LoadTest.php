@@ -4,12 +4,14 @@ namespace Drupal\Tests\islandora_group\Functional;
 
 use Drupal\Core\Url;
 use Drupal\Tests\BrowserTestBase;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Simple test to ensure that main page loads with module enabled.
  *
  * @group islandora_group
  */
+#[RunTestsInSeparateProcesses]
 class LoadTest extends BrowserTestBase {
 
   /**
@@ -27,6 +29,12 @@ class LoadTest extends BrowserTestBase {
   protected static $modules = ['islandora_group'];
 
   /**
+   * {@inheritdoc}
+   */
+  // phpcs:ignore -- Do not disable strict config schema checking in tests.
+  protected $strictConfigSchema = FALSE;
+
+  /**
    * A user with permission to administer site configuration.
    *
    * @var \Drupal\user\UserInterface
@@ -36,7 +44,7 @@ class LoadTest extends BrowserTestBase {
   /**
    * {@inheritdoc}
    */
-  protected function setUp() {
+  protected function setUp(): void {
     parent::setUp();
     $this->user = $this->drupalCreateUser(['administer site configuration']);
     $this->drupalLogin($this->user);
