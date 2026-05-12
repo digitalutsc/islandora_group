@@ -19,7 +19,8 @@
     },
     "require": {
         "drupal/group": "^3.1",
-        "drupal/groupmedia": "^4.0@alpha"
+        "drupal/groupmedia": "^4.0@alpha",
+        "drupal/field_permissions": "^1.2"
     },
     "authors": [
         {
