@@ -843,7 +843,7 @@ class Utilities {
       }
     }
 
-    return $group_ids;
+    return array_unique($group_ids);
   }
 
   /**
@@ -863,7 +863,7 @@ class Utilities {
         $group_ids[] = $rel->getGroup()->label();
       }
     }
-    return $group_ids;
+    return array_unique($group_ids);
   }
 
 }
