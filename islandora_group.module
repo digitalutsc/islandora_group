@@ -66,11 +66,15 @@ function islandora_group_entity_delete(EntityInterface $entity) {
  * Implements hook_form_alter().
  */
 function islandora_group_form_alter(&$form, &$form_state, $form_id) {
-  if (str_starts_with($form_id, "group_content_group_content_type")  && str_ends_with($form_id, "_delete_form")) {
-    // When insert update.
-    $form['actions']['submit']['#submit'][] = 'form_submit_delete_relation_untagging_entity_to_group';
+  $form_object = $form_state->getFormObject();
+  if ($form_object instanceof \Drupal\Core\Entity\EntityFormInterface) {
+    $entity = $form_object->getEntity();
+    if (in_array($entity->getEntityTypeId(), ['group_relationship', 'group_content']) && $form_object->getOperation() === 'delete') {
+      $form['actions']['submit']['#submit'][] = ['\Drupal\islandora_group\Utilities', 'form_submit_delete_relation_untagging_entity_to_group'];
+    }
   }
-  elseif (in_array($form_id, ['media_access_control_form', "islandora_object_access_control_form"])) {
+
+  if (in_array($form_id, ['media_access_control_form', "islandora_object_access_control_form"])) {
     $form['#attached']['library'] = [
       'islandora_group/datatables',
     ];
