@@ -116,21 +116,18 @@ function islandora_group_node_insert(NodeInterface $node) {
  */
 function islandora_group_node_update(NodeInterface $node) {
   Utilities::print_log("islandora_group_node_update");
+  // Get access control field from config.
+  $access_control_field = Utilities::getAccessControlFieldinNode($node);
 
+  // Make sure the selected access control field valid.
+  if (empty($access_control_field) || !$node->hasField($access_control_field)) {
+	return;
+  }
 
-// Get access control field from config.
-      $access_control_field = Utilities::getAccessControlFieldinNode($node);
-
-      // Make sure the selected access control field valid.
-      if (empty($access_control_field) || !$node->hasField($access_control_field)) {
-        return;
-      }
-
-      $node_terms = $node->get($access_control_field)->referencedEntities();
-      if (count($node_terms) ==0) {
-	Utilities::drupal_log("Removing relationsihp ....");
- 	Utilities::clear_group_relation_by_entity($node);
-	} 
+  $node_terms = $node->get($access_control_field)->referencedEntities();
+  if (count($node_terms) ==0) {
+	Utilities::clear_group_relation_by_entity($node);
+  }  
 
   if (!Utilities::isCalledFromGroupModule()) {
     Utilities::adding_islandora_object_to_group($node);
