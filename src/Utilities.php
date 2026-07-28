@@ -57,20 +57,7 @@ class Utilities {
    * @throws \Drupal\Core\Entity\EntityStorageException
    */
   public static function clear_group_relation_by_entity($entity) {
-    // Get access control field from config.
-    if ($entity->getEntityTypeId() === "node") {
-      // Get access control field from config.
-      $access_control_field = self::getAccessControlFieldinNode($entity);
-    }
-    elseif ($entity->getEntityTypeId() === "media") {
-      $access_control_field = self::getAccessControlFieldinMedia($entity);
-    }
-
-    // Check if $access_control_field exists and valid.
-    if (empty($access_control_field) || !$entity->hasField($access_control_field)) {
-      return;
-    }
-    // For each term, loop through groups-entity.
+    // Check if group relationships exist for the entity and delete them.
     foreach (GroupRelationship::loadByEntity($entity) as $group_content) {
       $group_content->delete();
     }
@@ -109,11 +96,11 @@ class Utilities {
     $node = Node::load($nid);
 
     // Clear any previous relations before adding new ones if called from the UI.
-    // 1. Clear field_access_terms in media level.
-    self::untag_existed_field_access_terms($node);
-
-    // 2. Clearing group relation with islandora object.
+    // 1. Clearing group relation with islandora object first.
     self::clear_group_relation_by_entity($node);
+
+    // 2. Clear field_access_terms.
+    self::untag_existed_field_access_terms($node);
 
     if (count($targets) > 0) {
       // Get access control field from config.
@@ -134,6 +121,8 @@ class Utilities {
    * @return void
    */
   public static function taggingFieldAccessTermMedia($media, $targets) {
+    // Clearing group relation with media first.
+    self::clear_group_relation_by_entity($media);
 
     self::untag_existed_field_access_terms($media);
 
@@ -414,8 +403,16 @@ class Utilities {
    * @return void
    */
   public static function clear_term_in_field_access_terms($ne, $group_name) {
-    // Get access control field from config.
-    $access_control_field = self::getAccessControlFieldinNode($ne);
+    // Get access control field from config based on entity type.
+    if ($ne->getEntityTypeId() === 'node') {
+      $access_control_field = self::getAccessControlFieldinNode($ne);
+    }
+    elseif ($ne->getEntityTypeId() === 'media') {
+      $access_control_field = self::getAccessControlFieldinMedia($ne);
+    }
+    else {
+      return;
+    }
 
     // @todo search if the node->field_access_terms contain group name
     if (empty($access_control_field) || !$ne->hasField($access_control_field)) {
@@ -498,7 +495,8 @@ class Utilities {
     // Get field_access_terms.
     $terms = $media->get($access_control_field)->referencedEntities();
     if (empty($terms)) {
-      // No term, exit;.
+      // No term, clear all group relationship between the media and group
+ 	    self::updating_media_only_into_group($media);
       return;
     }
 
@@ -721,7 +719,7 @@ class Utilities {
     $form_object = $form_state->getFormObject();
     if ($form_object instanceof EntityForm) {
       $entity = $form_object->getEntity();
-      if ($entity->getEntityTypeId() === 'group_content') {
+      if (in_array($entity->getEntityTypeId(), ['group_relationship', 'group_content'])) {
         $group_content = $entity;
         $group = $group_content->getGroup();
         if ($entity->getEntity()->getEntityTypeId() === "node") {
