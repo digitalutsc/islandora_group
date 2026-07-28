@@ -495,8 +495,8 @@ class Utilities {
     // Get field_access_terms.
     $terms = $media->get($access_control_field)->referencedEntities();
     if (empty($terms)) {
-      // No term, exit;.
- 	self::updating_media_only_into_group($media);
+      // No term, clear all group relationship between the media and group
+ 	    self::updating_media_only_into_group($media);
       return;
     }
 
